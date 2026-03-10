@@ -18,14 +18,13 @@ const SCOPES = ["https://www.googleapis.com/auth/drive"];
  * Script para autorizar la aplicación de Google Drive vía OAuth 2.0 y obtener un refresh_token
  */
 async function authorize() {
-    if (!fs.existsSync(CREDENTIALS_PATH)) {
-        console.error(`❌ El archivo ${CREDENTIALS_PATH} no existe.`);
-        console.log("   Asegúrate de haber descargado el JSON 'ID de cliente de OAuth' y haberlo renombrado a 'oauth-credentials.json'");
+    if (!process.env.GOOGLE_OAUTH_CREDENTIALS) {
+        console.error(`❌ La variable GOOGLE_OAUTH_CREDENTIALS no existe en tu .env.`);
+        console.log("   Debes pegar el contenido del JSON 'ID de cliente de OAuth' allí primero.");
         process.exit(1);
     }
 
-    const content = fs.readFileSync(CREDENTIALS_PATH, "utf8");
-    const credentials = JSON.parse(content);
+    const credentials = JSON.parse(process.env.GOOGLE_OAUTH_CREDENTIALS);
     const { client_secret, client_id, redirect_uris } = credentials.installed || credentials.web;
 
     const oAuth2Client = new google.auth.OAuth2(
@@ -96,9 +95,12 @@ function getAccessToken(oAuth2Client) {
                 console.warn("   quitarle el acceso a la app, y correr este script de nuevo.");
             }
 
-            fs.writeFileSync(TOKEN_PATH, JSON.stringify(token, null, 2));
-            console.log(`\n🎉 ¡Autenticación exitosa! Tokens guardados en: ${TOKEN_PATH}`);
-            console.log("   El Scraper ya puede subir PDFs a tu Drive.");
+            console.log(`\n🎉 ¡Autenticación exitosa!`);
+            console.log("\n===========================================");
+            console.log("Copia la siguiente línea y pégala en tu archivo .env:");
+            console.log("===========================================\n");
+            console.log(`GOOGLE_DRIVE_TOKENS=${JSON.stringify(token)}\n`);
+            console.log("   El Scraper ya puede subir PDFs a tu Drive una vez que guardes el .env.");
         });
     });
 }

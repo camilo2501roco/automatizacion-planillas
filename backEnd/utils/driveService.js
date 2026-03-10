@@ -14,12 +14,11 @@ const ROOT_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
  * @returns {import('googleapis').drive_v3.Drive}
  */
 const getDriveClient = () => {
-    // 1. Leer credenciales OAuth2
-    const credentialsPath = path.resolve(__dirname, "..", "config", "oauth-credentials.json");
-    if (!fs.existsSync(credentialsPath)) {
-        throw new Error(`Falta archivo de credenciales: ${credentialsPath}`);
+    // 1. Leer credenciales OAuth2 desde variables de entorno
+    if (!process.env.GOOGLE_OAUTH_CREDENTIALS) {
+        throw new Error("Falta la variable de entorno GOOGLE_OAUTH_CREDENTIALS en el .env");
     }
-    const credentials = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
+    const credentials = JSON.parse(process.env.GOOGLE_OAUTH_CREDENTIALS);
     const { client_secret, client_id, redirect_uris } = credentials.installed || credentials.web;
 
     const oAuth2Client = new google.auth.OAuth2(
@@ -28,13 +27,12 @@ const getDriveClient = () => {
         redirect_uris[0] || "http://localhost"
     );
 
-    // 2. Cargar token guardado
-    const tokenPath = path.resolve(__dirname, "..", "config", "drive-tokens.json");
-    if (!fs.existsSync(tokenPath)) {
-        throw new Error(`Falta el token OAuth. Ejecuta: node scripts/setupDriveAuth.js`);
+    // 2. Cargar token guardado desde variables de entorno
+    if (!process.env.GOOGLE_DRIVE_TOKENS) {
+        throw new Error("Falta la variable de entorno GOOGLE_DRIVE_TOKENS en el .env. Ejecuta: node scripts/setupDriveAuth.js");
     }
 
-    const token = JSON.parse(fs.readFileSync(tokenPath, "utf-8"));
+    const token = JSON.parse(process.env.GOOGLE_DRIVE_TOKENS);
     oAuth2Client.setCredentials(token);
 
     return google.drive({ version: "v3", auth: oAuth2Client });
