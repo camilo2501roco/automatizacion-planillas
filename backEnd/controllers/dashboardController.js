@@ -1,0 +1,110 @@
+import Report from "../models/Report.js";
+import Contractor from "../models/Contractor.js";
+
+/**
+ * GET /api/dashboard/reports
+ * Lista reportes con filtros opcionales. Solo lectura.
+ * Requiere authMiddleware (JWT del supervisor).
+ *
+ * Query params:
+ *  - status: "pending" | "processing" | "success" | "error" | "downloaded"
+ *  - platform: "soi" | "aportes_en_linea" | "asopagos" | "mi_planilla"
+ *  - month: número del mes (1-12)
+ *  - year: año (ej: 2026)
+ *  - page: número de página (default: 1)
+ *  - limit: resultados por página (default: 20, max: 100)
+ */
+export const getReports = async (req, res, next) => {
+    try {
+        const {
+            status,
+            platform,
+            month,
+            year,
+            page = 1,
+            limit = 20,
+        } = req.query;
+
+        // Construir filtro dinámico
+        const filter = {};
+
+        if (status) {
+            filter.status = status;
+        }
+
+        if (platform) {
+            filter.platform = platform;
+        }
+
+        // Filtrar por mes/año usando createdAt
+        if (year) {
+            const y = parseInt(year);
+            const m = month ? parseInt(month) : null;
+
+            if (m) {
+                // Mes específico
+                const startDate = new Date(y, m - 1, 1);
+                const endDate = new Date(y, m, 1);
+                filter.createdAt = { $gte: startDate, $lt: endDate };
+            } else {
+                // Año completo
+                const startDate = new Date(y, 0, 1);
+                const endDate = new Date(y + 1, 0, 1);
+                filter.createdAt = { $gte: startDate, $lt: endDate };
+            }
+        }
+
+        // Paginación
+        const pageNum = Math.max(1, parseInt(page));
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+        const skip = (pageNum - 1) * limitNum;
+
+        // Consultar reportes con datos del contratista
+        const [reports, total] = await Promise.all([
+            Report.find(filter)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limitNum)
+                .populate("contractorId", "documentType documentNumber fullName eps")
+                .lean(),
+            Report.countDocuments(filter),
+        ]);
+
+        res.json({
+            success: true,
+            data: reports,
+            pagination: {
+                page: pageNum,
+                limit: limitNum,
+                total,
+                totalPages: Math.ceil(total / limitNum),
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * GET /api/dashboard/stats
+ * Resumen rápido de conteos por status.
+ * Requiere authMiddleware.
+ */
+export const getStats = async (req, res, next) => {
+    try {
+        const [pending, processing, success, error, total] = await Promise.all([
+            Report.countDocuments({ status: "pending" }),
+            Report.countDocuments({ status: "processing" }),
+            Report.countDocuments({ status: "success" }),
+            Report.countDocuments({ status: "error" }),
+            Report.countDocuments(),
+        ]);
+
+        res.json({
+            success: true,
+            stats: { pending, processing, success, error, total },
+        });
+    } catch (error) {
+        next(error);
+    }
+};

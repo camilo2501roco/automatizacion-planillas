@@ -1,0 +1,44 @@
+{
+  "name": "automatizacion-certificados",
+  "version": "1.0.0",
+  "description": "Sistema de automatización para consulta y generación de certificados de seguridad social mediante formularios web.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon index.js",
+    "start": "node index.js",
+    "seed": "node scripts/seed.js",
+    "scraper": "node scrapers/scraperRunner.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/camilo2501roco/automatizacion-certificados.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/camilo2501roco/automatizacion-certificados/issues"
+  },
+  "homepage": "https://github.com/camilo2501roco/automatizacion-certificados#readme",
+  "dependencies": {
+    "2captcha": "^3.0.5-2",
+    "adm-zip": "^0.5.16",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-validator": "^7.3.1",
+    "googleapis": "^171.4.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.1.0",
+    "mongoose": "^9.2.4",
+    "node-cron": "^4.2.1",
+    "playwright": "^1.58.2",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
