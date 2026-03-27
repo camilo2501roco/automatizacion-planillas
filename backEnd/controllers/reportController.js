@@ -1,7 +1,7 @@
 import { validationResult } from "express-validator";
 import Contractor from "../models/Contractor.js";
 import Report from "../models/Report.js";
-import { validatePlatformData } from "../utils/platformValidator.js";
+import { validatePlatformData } from "../validations/platform.validation.js";
 
 /**
  * POST /api/reports
@@ -19,7 +19,7 @@ export const submitReport = async (req, res, next) => {
             });
         }
 
-        const { documentType, documentNumber, fullName, eps, platform, platformData } = req.body;
+        const { documentType, documentNumber, fullName, eps, platform, platformData, supervisorId } = req.body;
 
         // 2. Validar campos específicos de la plataforma
         const platformValidation = validatePlatformData(platform, platformData);
@@ -34,15 +34,34 @@ export const submitReport = async (req, res, next) => {
         // 3. Buscar o crear el Contractor (upsert por documentType + documentNumber)
         const contractor = await Contractor.findOneAndUpdate(
             { documentType, documentNumber },
-            { fullName, eps },
-            { upsert: true, new: true, runValidators: true }
+            { fullName, eps, supervisorId },
+            { upsert: true, returnDocument: 'after', runValidators: true }
         );
 
-        // 4. Crear el Report con status: pending
+        // 4. Calcular el periodo del reporte (mes vencido mes subido)
+        let mesConsulta, anioConsulta;
+
+        if (platform === 'aportes_en_linea') {
+            mesConsulta = parseInt(platformData.mes || platformData.mesFin);
+            anioConsulta = parseInt(platformData.anio || platformData.anioFin);
+        } else {
+            mesConsulta = parseInt(platformData.mes);
+            anioConsulta = parseInt(platformData.anio);
+        }
+
+        const reportMonth = mesConsulta;
+        const reportYear = anioConsulta;
+
+        console.log(`📌 Automatización: Consulta ${mesConsulta}/${anioConsulta} -> Reporte ${reportMonth}/${reportYear}`);
+
+        // 5. Crear el Report con status: pending
         const report = await Report.create({
             contractorId: contractor._id,
+            supervisorId,
             platform,
             platformData,
+            reportMonth,
+            reportYear,
             status: "pending",
         });
 

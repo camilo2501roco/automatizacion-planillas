@@ -7,6 +7,11 @@ const reportSchema = new Schema(
             ref: "Contractor",
             required: [true, "El ID del contratista es obligatorio"],
         },
+        supervisorId: {
+            type: Schema.Types.ObjectId,
+            ref: "Supervisor",
+            required: [true, "El supervisor es obligatorio para vincular el reporte a su carpeta"],
+        },
         platform: {
             type: String,
             required: [true, "La plataforma es obligatoria"],
@@ -18,6 +23,14 @@ const reportSchema = new Schema(
         platformData: {
             type: Schema.Types.Mixed,
             required: [true, "Los datos de la plataforma son obligatorios"],
+        },
+        reportMonth: {
+            type: Number,
+            required: [true, "El mes del reporte es obligatorio"],
+        },
+        reportYear: {
+            type: Number,
+            required: [true, "el año del reporte es obligatorio"],
         },
         status: {
             type: String,
@@ -43,6 +56,10 @@ const reportSchema = new Schema(
         filePath: {
             type: String,
             default: null,
+        },
+        attempts: {
+            type: Number,
+            default: 0,
         },
     },
     {

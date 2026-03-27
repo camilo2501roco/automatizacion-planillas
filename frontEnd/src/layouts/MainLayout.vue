@@ -3,13 +3,10 @@
     <q-header elevated class="bg-primary text-white">
       <q-toolbar>
         <!-- Logo simulado o título -->
-        <q-btn flat dense round icon="shield" aria-label="Logo" />
 
-        <q-toolbar-title>
+        <q-toolbar-title class="text-center">
           Certificados de Seguridad Social
         </q-toolbar-title>
-
-        <div>V1.0.0</div>
       </q-toolbar>
     </q-header>
 
@@ -25,7 +22,22 @@
 </template>
 
 <script setup>
-// Layout base
+import { useRouter } from 'vue-router'
+import { useQuasar } from 'quasar'
+
+const router = useRouter()
+const $q = useQuasar()
+
+const logout = () => {
+  localStorage.removeItem('auth_token')
+  $q.notify({
+    color: 'info',
+    textColor: 'white',
+    icon: 'info',
+    message: 'Has cerrado sesión'
+  })
+  router.push('/login')
+}
 </script>
 
 <style scoped>
@@ -39,3 +51,4 @@
   opacity: 0;
 }
 </style>
+ Riverside

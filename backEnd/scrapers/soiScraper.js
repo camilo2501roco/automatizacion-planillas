@@ -2,65 +2,24 @@ import { chromium } from "playwright";
 import path from "path";
 import fs from "fs";
 import AdmZip from "adm-zip";
-import { randomDelay, humanType, humanClick, humanSelect } from "../utils/humanBehavior.js";
+import { randomDelay, humanType, humanClick, humanSelect } from "../helpers/humanBehavior.js";
 
 /**
- * Mapeo de tipos de documento del sistema a valores del <select> de SOI.
+ * Mapeo de tipos de documento del backend a las ETIQUETAS EXACTAS (labels) del select de SOI.
  */
-const DOC_TYPE_MAP = {
-    CC: "1",  // Cédula de ciudadanía
-    CE: "6",  // Cédula de extranjería
-    PA: "5",  // Pasaporte
-    TI: "3",  // Tarjeta de identidad
+const DOC_LABEL_MAP = {
+    "CC": "Cédula de ciudadanía",
+    "CD": "Carné diplomático",
+    "CE": "Cédula de extranjería",
+    "PA": "Pasaporte",
+    "PE": "Permiso especial permanencia",
+    "PT": "Permiso por protección temporal",
+    "RC": "REGISTRO CIVIL",
+    "SC": "Salvo conducto",
+    "TI": "Tarjeta de identidad"
 };
 
 const SOI_URL = "https://servicio.nuevosoi.com.co/soi/certificadoAportesCotizante.do";
-
-/**
- * Mapeo RÍGIDO de nombres de EPS a valores del dropdown de SOI.
- * Los nombres deben coincidir EXACTAMENTE con lo que envía el frontend.
- */
-const EPS_MAP = {
-    "SANITAS": "128",  // EPS005 - SANITAS S.A.
-    "SALUD TOTAL": "126",  // EPS002 - SALUD TOTAL
-    "NUEVA EPS": "171",  // EPS037 - NUEVA E.P.S
-    "COMPENSAR": "130",  // EPS008 - COMPENSAR EPS
-    "SURA": "132",  // EPS010 - SURAMERICANA
-    "FAMISANAR": "131",  // EPS009 - FAMISANAR
-    "COOSALUD": "134",  // EPS016 - COOSALUD
-    "MUTUAL SER": "192",  // EPS042 - MUTUAL SER
-    "ALIANSALUD": "127",  // EPS001 - ALIANSALUD
-    "COMFENALCO VALLE": "129",  // EPS006 - COMFENALCO VALLE
-    "SOS": "133",  // EPS012 - COOMEVA (SOS)
-    "CAJACOPI": "197",  // EPS048 - CAJACOPI
-    "CAPITAL SALUD": "176",  // EPSS34 - CAPITAL SALUD
-    "SAVIA SALUD": "175",  // EPSS33 - SAVIA SALUD
-    "EMSSANAR": "168",  // EPS036 - EMSSANAR
-};
-
-/**
- * Busca el valor del dropdown de SOI para una EPS dada.
- * Búsqueda rígida: primero intenta match exacto, luego por inclusión.
- *
- * @param {string} epsName - Nombre de la EPS
- * @returns {string|null} Valor del dropdown o null
- */
-const getEpsValue = (epsName) => {
-    const normalized = epsName.trim().toUpperCase();
-
-    // Match exacto
-    if (EPS_MAP[normalized]) {
-        return EPS_MAP[normalized];
-    }
-
-    // Buscar si el nombre contiene alguna clave conocida
-    const key = Object.keys(EPS_MAP).find((k) => normalized.includes(k));
-    if (key) {
-        return EPS_MAP[key];
-    }
-
-    return null;
-};
 
 /**
  * Ejecuta el scraper de SOI para un reporte específico.
@@ -81,19 +40,15 @@ export const scrapeSoi = async (report, downloadDir) => {
     const { documentType, documentNumber, eps } = contractor;
     const { mes, anio } = platformData;
 
-    // Resolver EPS ANTES de abrir el navegador — si no existe, no gastar recursos
-    const epsValue = getEpsValue(eps);
-    if (!epsValue) {
-        const available = Object.keys(EPS_MAP).join(", ");
-        console.error(`   ❌ EPS "${eps}" no reconocida. Opciones: ${available}`);
-        return { success: false, error: `EPS "${eps}" no reconocida. Usa: ${available}` };
+    if (!eps) {
+        return { success: false, error: "La EPS es obligatoria para la plataforma SOI." };
     }
 
     let browser = null;
 
     try {
         console.log(`\n🔍 SOI Scraper — Doc: ${documentType} ${documentNumber}`);
-        console.log(`   EPS: ${eps} → valor SOI: ${epsValue} | Periodo: ${mes}/${anio}`);
+        console.log(`   EPS: ${eps} | Periodo: ${mes}/${anio}`);
 
         // 1. Lanzar navegador
         browser = await chromium.launch({
@@ -114,33 +69,74 @@ export const scrapeSoi = async (report, downloadDir) => {
 
         // 3. Llenar datos del APORTANTE (sección superior)
         console.log("   ✏️  Llenando datos del aportante...");
-        const docTypeValue = DOC_TYPE_MAP[documentType] || "1";
-        await humanSelect(page, "#tipoDocumentoAportante", docTypeValue);
+        const exactDocLabel = DOC_LABEL_MAP[documentType] || "Cédula de ciudadanía";
+        await randomDelay(200, 400);
+        await page.selectOption("#tipoDocumentoAportante", { label: exactDocLabel });
+        await randomDelay(300, 500);
         await humanType(page, 'input[name="numeroDocumentoAportante"]', documentNumber);
 
         // 4. Llenar datos del COTIZANTE (sección inferior, mismos datos para independientes)
         console.log("   ✏️  Llenando datos del cotizante...");
-        await humanSelect(page, "#tipoDocumentoCotizante", docTypeValue);
+        await randomDelay(200, 400);
+        await page.selectOption("#tipoDocumentoCotizante", { label: exactDocLabel });
+        await randomDelay(300, 500);
         await humanType(page, "#numeroDocumentoCotizante", documentNumber);
 
-        // 5. Seleccionar EPS con valor rígido
-        console.log(`   🏥 Seleccionando EPS: ${eps} (${epsValue})...`);
-        await humanSelect(page, "#administradoraSalud", epsValue);
+        // 5. Seleccionar EPS por su ETIQUETA EXACTA (label)
+        console.log(`   🏥 Seleccionando EPS exacta: ${eps}...`);
+        
+        // Verificar si la opción existe antes de seleccionar para evitar timeout de 30s
+        const options = await page.$$eval('#administradoraSalud option', opts => opts.map(o => o.text.trim()));
+        if (!options.includes(eps)) {
+            console.log("   ❌ La EPS proporcionada no existe en el menú de SOI.");
+            console.log("   📋 Opciones disponibles en SOI:", options.slice(0, 5).join(", "), "...");
+            throw new Error(`La EPS '${eps}' no es válida para SOI. Verifique que coincida exactamente con las opciones del formulario.`);
+        }
+
+        await randomDelay(200, 400);
+        await page.selectOption("#administradoraSalud", { label: eps });
+        await randomDelay(300, 500);
 
         // 6. Seleccionar Mes y Año
         console.log(`   📅 Seleccionando periodo: ${mes}/${anio}...`);
         await humanSelect(page, "#periodoLiqSaludMes", String(parseInt(mes)));
         await humanSelect(page, "#periodoLiqSaludAnnio", String(anio));
 
-        // 7. Click en "Descargar PDF"
+        // 7. Click en "Descargar PDF" e interceptar la descarga
         console.log("   📥 Descargando PDF...");
         await randomDelay(800, 1500);
 
-        // Interceptar la descarga
-        const [download] = await Promise.all([
-            page.waitForEvent("download", { timeout: 30000 }),
-            page.click("button:has-text('Descargar PDF')"),
-        ]);
+        // Interceptar la descarga con manejo de errores específicos de la plataforma
+        let download;
+        try {
+            [download] = await Promise.all([
+                page.waitForEvent("download", { timeout: 30000 }),
+                page.click("button:has-text('Descargar PDF')"),
+            ]);
+        } catch (downloadError) {
+            // Si hay timeout, buscar si hay mensajes de error en la página
+            const errorMsg = await page.evaluate(() => {
+                // Buscar divs de alerta o mensajes de error típicos de SOI
+                const selectors = ['.f-error', '.mensajeError', '.alert-danger', '#mensajesError'];
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el && el.innerText.trim()) return el.innerText.trim();
+                }
+                return null;
+            });
+
+            if (errorMsg) {
+                console.log(`   ⚠️ SOI reportó un mensaje: "${errorMsg}"`);
+                throw new Error(`SOI: ${errorMsg}`);
+            }
+
+            // Capturar pantalla para diagnóstico si no se encontró mensaje pero hubo timeout
+            const screenshotPath = path.join(downloadDir, `error_soi_${documentNumber}.png`);
+            await page.screenshot({ path: screenshotPath });
+            console.log(`   📸 Captura de pantalla de error guardada en: ${screenshotPath}`);
+            
+            throw downloadError;
+        }
 
         // 8. Guardar el archivo descargado (SOI descarga un ZIP)
         const zipFileName = `${documentType}_${documentNumber}_${anio}_${mes}.zip`;

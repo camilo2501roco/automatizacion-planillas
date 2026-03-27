@@ -6,8 +6,15 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import Report from "../models/Report.js";
 import Contractor from "../models/Contractor.js";
+import Supervisor from "../models/Supervisor.js";
 import { scrapeSoi } from "./soiScraper.js";
-import { uploadToDrive } from "../utils/driveService.js";
+import { scrapeAportesEnLinea } from "./aportesEnLineaScraper.js";
+import { scrapeAsopagos } from "./asopagosScraper.js";
+import { scrapeMiPlanilla } from "./miPlanillaScraper.js";
+
+import { uploadToDrive, setupSupervisorFolder, checkIfFolderExists } from "../services/driveService.js";
+ 
+let isRunnerRunning = false;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,9 +25,33 @@ const DOWNLOADS_DIR = path.join(__dirname, "..", "downloads");
 // Mapeo de plataformas a sus funciones scraper
 const SCRAPER_MAP = {
     soi: scrapeSoi,
-    // aportes_en_linea: scrapeAportesEnLinea,  // TODO
-    // asopagos: scrapeAsopagos,                // TODO
-    // mi_planilla: scrapeMiPlanilla,           // TODO
+    aportes_en_linea: scrapeAportesEnLinea,
+    asopagos: scrapeAsopagos,
+    mi_planilla: scrapeMiPlanilla,
+};
+
+const CRON_STATUS_FILE = path.join(__dirname, "..", "config", "cron-status.json");
+
+/**
+ * Obtiene el estado del cron desde el archivo de configuración.
+ */
+const getCronStatus = () => {
+    try {
+        if (!fs.existsSync(CRON_STATUS_FILE)) return true; // Habilitado por defecto
+        const data = fs.readFileSync(CRON_STATUS_FILE, "utf8");
+        return JSON.parse(data).enabled;
+    } catch (error) {
+        return true;
+    }
+};
+
+/**
+ * Guarda el estado del cron en el archivo de configuración.
+ */
+export const setCronStatus = (enabled) => {
+    const configDir = path.dirname(CRON_STATUS_FILE);
+    if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(CRON_STATUS_FILE, JSON.stringify({ enabled }), "utf8");
 };
 
 /**
@@ -36,6 +67,7 @@ const ensureDownloadsDir = () => {
 /**
  * Procesa todos los reportes pending de una plataforma específica.
  * Los procesa UNO POR UNO en orden de llegada (createdAt ascendente).
+ * Prioriza los que tienen 0 intentos (nuevos) antes que los reintentos.
  *
  * @param {string} platform - Plataforma a procesar (ej: "soi")
  */
@@ -46,11 +78,12 @@ const processPendingReports = async (platform) => {
         return;
     }
 
-    // Buscar reportes pending de esta plataforma, ordenados por fecha de creación
+    // Buscar reportes pending. 
+    // Ordenamos por attempts (0 primero) y luego por fecha (más viejos primero).
     const pendingReports = await Report.find({
         status: "pending",
         platform,
-    }).sort({ createdAt: 1 });
+    }).sort({ attempts: 1, createdAt: 1 });
 
     if (pendingReports.length === 0) {
         return;
@@ -60,9 +93,13 @@ const processPendingReports = async (platform) => {
 
     for (const report of pendingReports) {
         try {
-            // Marcar como processing
-            report.status = "processing";
-            await report.save();
+            // 1. Obtener una versión fresca del reporte y marcar como processing
+            const currentReport = await Report.findById(report._id);
+            if (!currentReport || currentReport.status !== "pending") continue;
+
+            currentReport.status = "processing";
+            currentReport.attempts = (currentReport.attempts || 0) + 1;
+            await currentReport.save();
 
             // Obtener datos del contratista
             const contractor = await Contractor.findById(report.contractorId);
@@ -92,14 +129,30 @@ const processPendingReports = async (platform) => {
 
                 // Subir a Google Drive
                 try {
-                    const { mes, anio } = report.platformData;
+                    // Calculamos el periodo de pago (mes vencido: mes consulta + 1)
+                    const paymentMonth = (report.reportMonth % 12) + 1;
+                    const paymentYear = paymentMonth === 1 ? report.reportYear + 1 : report.reportYear;
+
+                    const finalMes = paymentMonth;
+                    const finalAnio = paymentYear;
+
+                    // Obtener el nombre del supervisor para la carpeta de Drive
+                    let supervisorName = null;
+                    if (report.supervisorId) {
+                        const supervisor = await Supervisor.findById(report.supervisorId);
+                        if (supervisor) {
+                            supervisorName = supervisor.name;
+                        }
+                    }
+
                     const driveResult = await uploadToDrive(
                         result.filePath,
                         contractor.fullName,
-                        anio,
-                        mes,
+                        finalAnio,
+                        finalMes,
                         contractor.documentType,
-                        contractor.documentNumber
+                        contractor.documentNumber,
+                        supervisorName
                     );
 
                     report.driveFileId = driveResult.driveFileId;
@@ -115,19 +168,62 @@ const processPendingReports = async (platform) => {
                     // Status queda en 'success' con filePath local
                 }
             } else {
-                report.status = "error";
-                report.errorReason = result.error;
-                console.log(`❌ Reporte ${report._id} falló: ${result.error}`);
+                // Lógica de re-intento inteligente (Máximo 3 intentos)
+                if (report.attempts < 3) {
+                    report.status = "pending";
+                    report.errorReason = `Reintento ${report.attempts}/3: ${result.error}`;
+                    console.log(`🔄 Reporte ${report._id} falló (${report.attempts}/3). Volviendo a pending...`);
+                } else {
+                    report.status = "error";
+                    report.errorReason = `Máximo de intentos alcanzado (3/3): ${result.error}`;
+                    console.log(`❌ Reporte ${report._id} falló definitivamente tras 3 intentos.`);
+                }
             }
 
             await report.save();
         } catch (error) {
             // Error no detiene los demás reportes
-            report.status = "error";
-            report.errorReason = error.message;
+            if (report.attempts < 3) {
+                report.status = "pending";
+                report.errorReason = `Crash reintento ${report.attempts}/3: ${error.message}`;
+                console.log(`🔄 Reporte ${report._id} crasheó (${report.attempts}/3). Reintentando...`);
+            } else {
+                report.status = "error";
+                report.errorReason = `Crash definitivo (3/3): ${error.message}`;
+                console.log(`❌ Reporte ${report._id} crasheó definitivamente.`);
+            }
             await report.save();
-            console.error(`❌ Error procesando reporte ${report._id}: ${error.message}`);
         }
+    }
+};
+
+/**
+ * Busca reportes que quedaron en 'processing' por más de 15 minutos
+ * (probablemente por un crash del servidor) y los vuelve a 'pending'.
+ */
+const recoverStuckReports = async () => {
+    const timeoutDate = new Date(Date.now() - 5 * 60 * 1000); // 5 minutos atrás
+
+    const stuckReports = await Report.find({
+        status: "processing",
+        updatedAt: { $lt: timeoutDate }
+    });
+
+    for (const report of stuckReports) {
+        if (report.attempts < 3) {
+            report.status = "pending";
+            report.errorReason = `Recuperado de bloqueo (Intento ${report.attempts}/3)`;
+            console.log(`🔄 Recuperando reporte bloqueado ${report._id}...`);
+        } else {
+            report.status = "error";
+            report.errorReason = "Bloqueo persistente: El servidor falló repetidamente procesando este reporte.";
+            console.log(`❌ Marcando reporte bloqueado ${report._id} como error (Máximos intentos).`);
+        }
+        await report.save();
+    }
+
+    if (stuckReports.length > 0) {
+        console.log(`\n🔄 Se recuperaron ${stuckReports.length} reporte(s) que estaban bloqueados en 'processing'.`);
     }
 };
 
@@ -135,24 +231,56 @@ const processPendingReports = async (platform) => {
  * Ciclo principal: procesa todas las plataformas que tengan scraper implementado.
  */
 const runScraperCycle = async () => {
-    console.log(`\n⏰ [${new Date().toLocaleTimeString()}] Iniciando ciclo de scraping...`);
+    if (isRunnerRunning) {
+        console.log("⚠️  Ya hay un ciclo de scraping en ejecución. Saltando...");
+        return;
+    }
+
+    if (!getCronStatus()) {
+        console.log("⏸️  El cron está deshabilitado manualmente. Saltando ciclo...");
+        return;
+    }
+
+    isRunnerRunning = true;
+
+    try {
+        console.log(`\n⏰ [${new Date().toLocaleTimeString()}] Iniciando ciclo de scraping...`);
 
     ensureDownloadsDir();
 
+    // 1. Limpiar reportes estancados primero
+    await recoverStuckReports();
+
+    // 2. Limpiar imágenes temporales viejas (> 30 min) para mantener orden
+    const files = fs.readdirSync(DOWNLOADS_DIR);
+    const now = Date.now();
+    files.forEach(file => {
+        if (file.endsWith(".png") || file.endsWith(".jpg")) {
+            const filePath = path.join(DOWNLOADS_DIR, file);
+            const stats = fs.statSync(filePath);
+            if (now - stats.mtime.getTime() > 30 * 60 * 1000) {
+                fs.unlinkSync(filePath);
+            }
+        }
+    });
+
+    // 3. Procesar pendientes de cada plataforma
     for (const platform of Object.keys(SCRAPER_MAP)) {
         await processPendingReports(platform);
     }
 
     console.log(`✔️  Ciclo completado.\n`);
+    } finally {
+        isRunnerRunning = false;
+    }
 };
 
 /**
- * Inicia el cron job para ejecutar el scraper cada 3 minutos.
- * Se usa desde index.js después de conectar a la BD.
+ * Inicia el cron job para ejecutar el scraper diariamente a las 2:00 AM.
  */
 export const startScraperCron = () => {
-    // Ejecutar cada 3 minutos
-    cron.schedule("*/3 * * * *", async () => {
+    // Todos los días a las 2:00 AM
+    cron.schedule("0 2 * * *", async () => {
         try {
             await runScraperCycle();
         } catch (error) {
@@ -160,8 +288,14 @@ export const startScraperCron = () => {
         }
     });
 
-    console.log("🤖 Scraper cron iniciado — ejecutará cada 3 minutos");
+    console.log("🤖 Scraper cron iniciado — programado para las 2:00 AM diaria");
 };
+
+/**
+ * Exportamos el estado actual para los endpoints
+ */
+export const isCronActive = getCronStatus;
+
 
 /**
  * Modo standalone: ejecutar manualmente con `npm run scraper`.

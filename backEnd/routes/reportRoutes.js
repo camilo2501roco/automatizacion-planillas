@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { submitReportValidation } from "../middlewares/validators/reportValidator.js";
+import { submitReportValidation } from "../validations/report.validation.js";
 import { submitReport } from "../controllers/reportController.js";
 
 const router = Router();

@@ -2,11 +2,10 @@ import { Schema, model } from "mongoose";
 
 const supervisorSchema = new Schema(
     {
-        email: {
+        documentNumber: {
             type: String,
-            required: [true, "El email es obligatorio"],
+            required: [true, "El número de documento es obligatorio"],
             unique: true,
-            lowercase: true,
             trim: true,
         },
         password: {
@@ -17,10 +16,6 @@ const supervisorSchema = new Schema(
             type: String,
             required: [true, "El nombre es obligatorio"],
             trim: true,
-        },
-        googleDriveConfig: {
-            type: Schema.Types.Mixed,
-            default: null,
         },
     },
     {

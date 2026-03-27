@@ -1,9 +1,9 @@
-import { verifyToken } from "../utils/jwt.js";
+import { verifyToken } from "../helpers/jwt.js";
 
 /**
  * Middleware que protege rutas verificando el JWT.
  * Espera el header: Authorization: Bearer <token>
- * Si es válido, agrega req.supervisor con { id, email } y continúa.
+ * Si es válido, agrega req.supervisor con { id, documentNumber } y continúa.
  * Si no, responde 401.
  */
 export const authMiddleware = (req, res, next) => {
@@ -20,7 +20,7 @@ export const authMiddleware = (req, res, next) => {
 
     try {
         const decoded = verifyToken(token);
-        req.supervisor = { id: decoded.id, email: decoded.email };
+        req.supervisor = { id: decoded.id, documentNumber: decoded.documentNumber };
         next();
     } catch (error) {
         return res.status(401).json({

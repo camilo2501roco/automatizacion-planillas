@@ -21,12 +21,15 @@ export const getReports = async (req, res, next) => {
             platform,
             month,
             year,
+            search, // Nuevo parámetro de búsqueda
             page = 1,
             limit = 20,
         } = req.query;
 
         // Construir filtro dinámico
-        const filter = {};
+        const filter = {
+            supervisorId: req.supervisor.id
+        };
 
         if (status) {
             filter.status = status;
@@ -34,6 +37,20 @@ export const getReports = async (req, res, next) => {
 
         if (platform) {
             filter.platform = platform;
+        }
+
+        // Búsqueda por contratista (nombre o documento)
+        if (search) {
+            const searchRegex = new RegExp(search, "i");
+            const matchingContractors = await Contractor.find({
+                $or: [
+                    { fullName: searchRegex },
+                    { documentNumber: searchRegex }
+                ]
+            }).select("_id");
+            
+            const contractorIds = matchingContractors.map(c => c._id);
+            filter.contractorId = { $in: contractorIds };
         }
 
         // Filtrar por mes/año usando createdAt
@@ -92,17 +109,19 @@ export const getReports = async (req, res, next) => {
  */
 export const getStats = async (req, res, next) => {
     try {
-        const [pending, processing, success, error, total] = await Promise.all([
-            Report.countDocuments({ status: "pending" }),
-            Report.countDocuments({ status: "processing" }),
-            Report.countDocuments({ status: "success" }),
-            Report.countDocuments({ status: "error" }),
-            Report.countDocuments(),
+        const filter = { supervisorId: req.supervisor.id };
+        const [pending, processing, success, downloaded, error, total] = await Promise.all([
+            Report.countDocuments({ ...filter, status: "pending" }),
+            Report.countDocuments({ ...filter, status: "processing" }),
+            Report.countDocuments({ ...filter, status: "success" }),
+            Report.countDocuments({ ...filter, status: "downloaded" }),
+            Report.countDocuments({ ...filter, status: "error" }),
+            Report.countDocuments(filter),
         ]);
 
         res.json({
             success: true,
-            stats: { pending, processing, success, error, total },
+            stats: { pending, processing, success, downloaded, error, total },
         });
     } catch (error) {
         next(error);

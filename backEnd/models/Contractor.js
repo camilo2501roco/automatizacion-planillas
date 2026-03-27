@@ -6,8 +6,8 @@ const contractorSchema = new Schema(
             type: String,
             required: [true, "El tipo de documento es obligatorio"],
             enum: {
-                values: ["CC", "CE", "PA", "TI"],
-                message: "El tipo de documento '{VALUE}' no es válido. Usa: CC, CE, PA o TI",
+                values: ["CC", "CE", "PA", "TI", "CD", "PE", "PT", "RC", "SC"],
+                message: "El tipo de documento '{VALUE}' no es válido. Usa: CC, CE, PA, TI, CD, PE, PT, RC, o SC",
             },
             trim: true,
         },
@@ -25,6 +25,11 @@ const contractorSchema = new Schema(
             type: String,
             required: [true, "La EPS es obligatoria"],
             trim: true,
+        },
+        supervisorId: {
+            type: Schema.Types.ObjectId,
+            ref: "Supervisor",
+            default: null,
         },
     },
     {
