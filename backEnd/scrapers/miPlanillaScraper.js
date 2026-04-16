@@ -33,7 +33,7 @@ export const scrapeMiPlanilla = async (report, downloadDir) => {
         console.log(`\n🔍 Mi Planilla Scraper — Doc: ${documentType} ${documentNumber}`);
 
         browser = await chromium.launch({
-            headless: false,
+            headless: process.env.HEADLESS !== "false",
             args: ["--disable-popup-blocking", "--disable-extensions"],
         });
 

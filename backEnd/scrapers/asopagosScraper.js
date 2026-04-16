@@ -47,7 +47,7 @@ export const scrapeAsopagos = async (report, downloadDir) => {
         console.log(`\n🔍 Asopagos Scraper — Doc: ${documentType} ${documentNumber}`);
 
         browser = await chromium.launch({
-            headless: false,
+            headless: process.env.HEADLESS !== "false",
             args: [
                 "--disable-popup-blocking",
                 "--disable-extensions",

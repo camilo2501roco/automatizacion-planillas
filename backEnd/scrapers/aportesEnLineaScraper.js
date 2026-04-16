@@ -37,7 +37,7 @@ export const scrapeAportesEnLinea = async (report, downloadDir) => {
         console.log(`\n🔍 Aportes en Línea Scraper — Doc: ${documentType} ${documentNumber}`);
 
         browser = await chromium.launch({
-            headless: false,
+            headless: process.env.HEADLESS !== "false",
             args: ["--disable-popup-blocking", "--disable-extensions"],
         });
 

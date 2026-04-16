@@ -52,7 +52,7 @@ export const scrapeSoi = async (report, downloadDir) => {
 
         // 1. Lanzar navegador
         browser = await chromium.launch({
-            headless: false, // false para debug, cambiar a true en producción
+            headless: process.env.HEADLESS !== "false",
         });
 
         const context = await browser.newContext({

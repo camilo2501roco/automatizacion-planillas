@@ -195,21 +195,13 @@ export const setupSupervisorFolder = async (supervisorName) => {
     console.log(`   📂 Preparando espacio para supervisor: ${supervisorName}`);
     const supervisorRootId = await findOrCreateFolder(drive, supervisorName.toUpperCase(), activeRootId);
 
-    // 2. Crear carpeta "CERTIFICADOS DE PLANILLA" dentro de la carpeta del supervisor
+    // 2. Buscar/Crear carpeta "CERTIFICADOS DE PLANILLA" dentro de la carpeta del supervisor
     const shareableFolderName = "CERTIFICADOS DE PLANILLA";
-    console.log(`   📂 Creando carpeta de certificados: "${shareableFolderName}"`);
-    
-    const folder = await drive.files.create({
-        requestBody: {
-            name: shareableFolderName,
-            mimeType: "application/vnd.google-apps.folder",
-            parents: [supervisorRootId],
-        },
-        fields: "id",
-        supportsAllDrives: true,
-    });
+    console.log(`   📂 Preparando carpeta de certificados: "${shareableFolderName}"`);
 
-    return folder.data.id;
+    const shareableFolderId = await findOrCreateFolder(drive, shareableFolderName, supervisorRootId);
+
+    return shareableFolderId;
 };
 
 /**

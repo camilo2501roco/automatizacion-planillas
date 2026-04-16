@@ -57,6 +57,8 @@ backEnd/
 ├── scripts/
 │   ├── addSupervisor.js   ← Crear supervisores por terminal
 │   └── checkSupervisors.js← Listar supervisores existentes
+├── utils/
+│   └── setupDriveAuth.js  ← Generar refresh token de Google Drive OAuth2
 ├── validations/           ← Reglas de validación (express-validator)
 ├── downloads/             ← PDFs temporales (se eliminan tras subir a Drive)
 ├── swagger.yaml           ← Documentación de la API (/api-docs)
@@ -128,6 +130,24 @@ npm run scraper
 # Esto conecta a MongoDB, ejecuta UN ciclo completo, y se desconecta.
 ```
 
+### Modo Headless (navegador visible o invisible)
+
+Los scrapers usan Playwright para controlar un navegador. El comportamiento se controla con la variable `HEADLESS` en el `.env`:
+
+```env
+# false = navegador visible — puedes ver el scraper trabajando en pantalla (desarrollo/debug)
+# true  = sin interfaz gráfica — corre en segundo plano (producción/servidor)
+HEADLESS=false
+```
+
+| Entorno | Valor | Qué pasa |
+|---|---|---|
+| Desarrollo (tu PC) | `false` | Se abre una ventana de Chromium y ves cada paso del scraper |
+| Producción (servidor/VPS) | `true` | El scraper corre sin abrir nada, no necesita pantalla |
+| No definida | — | Por defecto es `true` (modo producción) |
+
+> **Nota:** En servidores Linux sin interfaz gráfica, `HEADLESS` debe ser `true` o no definirse. Si se usa `false` en un servidor sin display, el scraper fallará.
+
 ### Resolución de CAPTCHAs (2Captcha)
 
 1. El scraper detecta el captcha en pantalla.
@@ -165,55 +185,71 @@ GOOGLE_OAUTH_CLIENT_ID=tu_client_id.apps.googleusercontent.com
 GOOGLE_OAUTH_CLIENT_SECRET=GOCSPX-tu_client_secret
 GOOGLE_OAUTH_REFRESH_TOKEN=1//tu_refresh_token
 GOOGLE_DRIVE_FOLDER_ID=id_carpeta_raiz   ← (opcional, se crea automáticamente)
+
+HEADLESS=false   ← false=visible (desarrollo) | true=invisible (producción)
 ```
 
-### Paso 1: Crear Proyecto en Google Cloud
+### Prerequisito: Configurar la pantalla de consentimiento OAuth
+
+Antes de crear credenciales, Google requiere configurar la pantalla de consentimiento. Si ya la tienes configurada, puedes saltarte este paso.
+
+1. Ve a **"APIs y Servicios"** → **"Pantalla de consentimiento de OAuth"**.
+2. Tipo de usuario: **Externo** → clic en **"Crear"**.
+3. Llena los campos obligatorios: nombre de la app y correo de soporte.
+4. En **"Scopes"**, no necesitas agregar nada por ahora.
+5. En **"Usuarios de prueba"**, agrega el correo de la cuenta de Google que usará la app.
+6. Guarda y continúa.
+
+### Paso 1: Crear proyecto en Google Cloud
 
 1. Ve a [Google Cloud Console](https://console.cloud.google.com).
 2. Crea un proyecto nuevo (o usa uno existente).
 3. Ve a **"APIs y Servicios"** → **"Biblioteca"**.
 4. Busca **"Google Drive API"** y haz clic en **"Habilitar"**.
 
-### Paso 2: Crear Credenciales OAuth2
+### Paso 2: Crear credenciales OAuth2
 
 1. Ve a **"APIs y Servicios"** → **"Credenciales"**.
 2. Clic en **"Crear credenciales"** → **"ID de cliente OAuth 2.0"**.
-3. Si te pide configurar la **pantalla de consentimiento**:
-   - Tipo de usuario: **Externo**.
-   - Llena los campos básicos (nombre de app, correo).
-   - No necesitas agregar scopes ni usuarios de prueba por ahora.
-4. Tipo de aplicación: **"App de escritorio"**.
-5. Haz clic en "Crear".
-6. Copia el **Client ID** y el **Client Secret** al `.env`:
-   ```
-   GOOGLE_OAUTH_CLIENT_ID=391060...apps.googleusercontent.com
-   GOOGLE_OAUTH_CLIENT_SECRET=GOCSPX-...
-   ```
+3. Tipo de aplicación: **"App de escritorio"** → clic en **"Crear"**.
+4. Copia el **Client ID** y el **Client Secret** al archivo `.env`:
+
+```env
+GOOGLE_OAUTH_CLIENT_ID=391060...apps.googleusercontent.com
+GOOGLE_OAUTH_CLIENT_SECRET=GOCSPX-...
+```
+
+> El permiso que se solicitará al usuario es `https://www.googleapis.com/auth/drive.file`. Este scope solo permite acceder a los archivos que la propia app crea — no a todo tu Drive.
 
 ### Paso 3: Generar el Refresh Token
 
-El Refresh Token es lo que permite al sistema acceder a tu Drive sin que tengas que iniciar sesión cada vez.
+El Refresh Token permite al sistema acceder a tu Drive sin que tengas que iniciar sesión cada vez. El script que lo genera ya viene incluido en el repositorio en `backEnd/utils/setupDriveAuth.js`.
 
-**Usando el OAuth2 Playground de Google:**
+```bash
+cd backEnd
+node utils/setupDriveAuth.js
+```
 
-1. Ve a [https://developers.google.com/oauthplayground/](https://developers.google.com/oauthplayground/).
-2. En la esquina superior derecha, haz clic en el ícono de **engranaje** (⚙️):
-   - Marca ✅ **"Use your own OAuth credentials"**.
-   - Pega tu **Client ID** y **Client Secret**.
-3. En **Step 1** (panel izquierdo):
-   - Busca **"Drive API v3"** y selecciona el scope:
-     `https://www.googleapis.com/auth/drive`
-   - Haz clic en **"Authorize APIs"**.
-4. Inicia sesión con la **cuenta de Google que tiene el Drive** donde se guardarán los archivos.
-5. En **Step 2**:
-   - Haz clic en **"Exchange authorization code for tokens"**.
-   - Copia el valor de **"Refresh token"**.
-6. Pégalo en el `.env`:
-   ```
-   GOOGLE_OAUTH_REFRESH_TOKEN=1//05KcJbf5...
-   ```
+El script hará lo siguiente:
 
-> ⚠️ **IMPORTANTE:** Si la app en Google Cloud está en modo "Pruebas", el refresh token **expira cada 7 días**. Para que sea permanente, debes publicar la app (ir a "Pantalla de consentimiento" → "Publicar aplicación").
+1. Mostrará una URL de autorización en la consola.
+2. Abre esa URL en tu navegador e inicia sesión con la cuenta de Google donde se guardarán los archivos.
+3. Autoriza el acceso cuando Google lo solicite.
+4. El script guarda el refresh token automáticamente en el `.env`.
+
+Salida esperada:
+
+```
+🔧 Configuración de Google Drive OAuth2
+
+🔗 Abre esta URL en tu navegador:
+   https://accounts.google.com/o/oauth2/v2/auth?...
+
+⏳ Esperando autorización...
+
+✅ Autorización exitosa.
+📝 Refresh token guardado en .env
+```
 
 ### Paso 4: Carpeta Raíz (Opcional)
 
@@ -227,6 +263,17 @@ Si ya tienes una carpeta en Drive donde quieres que se guarden los certificados:
    ```
 
 Si lo **dejas vacío**, el sistema creará automáticamente una carpeta llamada `SISTEMA_AUTOMATIZACION_CERTIFICADOS` en la raíz de tu Drive y actualizará el `.env` con el ID nuevo.
+
+> ⚠️ **IMPORTANTE:** Si la app está en modo **"Pruebas"**, el refresh token **expira cada 7 días**. Para que sea permanente, publícala: ve a "Pantalla de consentimiento" → "Publicar aplicación".
+
+### Errores comunes
+
+| Error | Causa | Solución |
+|---|---|---|
+| `redirect_uri_mismatch` | El URI de redirección no coincide | Verifica que el tipo de app sea **"App de escritorio"**, no web |
+| `invalid_client` | Client ID o Secret incorrectos | Vuelve a copiar las credenciales en el `.env` |
+| `Token has been expired or revoked` | Refresh token expirado (modo pruebas) | Ejecuta de nuevo `setupDriveAuth.js` o publica la app |
+| `Access blocked` | Tu correo no está en usuarios de prueba | Agrégalo en la pantalla de consentimiento |
 
 ### Flujo Automático de Subida
 
@@ -402,5 +449,6 @@ cd frontEnd && npm run dev    # ← Frontend en http://localhost:5173
 | `npm run scraper` | backEnd/ | Ejecutar scrapers manualmente (1 ciclo) |
 | `node scripts/addSupervisor.js "N" "D" "P"` | backEnd/ | Crear supervisor |
 | `node scripts/checkSupervisors.js` | backEnd/ | Listar supervisores |
+| `node utils/setupDriveAuth.js` | backEnd/ | Generar refresh token de Google Drive |
 | `npm run dev` | frontEnd/ | Iniciar frontend Vite |
 | `npm run build` | frontEnd/ | Generar build de producción |
